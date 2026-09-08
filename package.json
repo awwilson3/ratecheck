@@ -1,0 +1,20 @@
+{
+  "name": "ratecheck",
+  "version": "0.1.0",
+  "description": "Replay a request log through a token bucket rate limiter",
+  "type": "module",
+  "bin": {
+    "ratecheck": "dist/main.js"
+  },
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}
