@@ -3,12 +3,34 @@ import { createReadStream } from 'node:fs'
 import { createInterface } from 'node:readline'
 import process from 'node:process'
 import { TokenBucket } from './tokenBucket.js'
+import { SlidingWindow } from './slidingWindow.js'
+import { FixedWindow } from './fixedWindow.js'
+
+type Algorithm = 'token-bucket' | 'sliding-window' | 'fixed-window'
+
+const ALGORITHMS: Algorithm[] = ['token-bucket', 'sliding-window', 'fixed-window']
 
 interface Options {
+  algorithm: Algorithm
   rate: number
   perMs: number
   burst: number
   files: string[]
+}
+
+interface RateLimiter {
+  check(atMs: number): { allowed: boolean; retryAfterMs: number }
+}
+
+function createLimiter(options: Options, refillRatePerMs: number): RateLimiter {
+  switch (options.algorithm) {
+    case 'token-bucket':
+      return new TokenBucket({ capacity: options.burst, refillRatePerMs })
+    case 'sliding-window':
+      return new SlidingWindow({ limit: options.rate, windowMs: options.perMs })
+    case 'fixed-window':
+      return new FixedWindow({ limit: options.rate, windowMs: options.perMs })
+  }
 }
 
 const DURATION_MULTIPLIERS: Record<string, number> = {
@@ -29,14 +51,24 @@ function parseDuration(raw: string): number {
 }
 
 function printUsage(): void {
-  console.log(`usage: ratecheck --rate <n> [--per <duration>] [--burst <n>] [file...]
+  console.log(`usage: ratecheck --rate <n> [--per <duration>] [--burst <n>] [--algorithm <name>] [file...]
 
-Replays a log of request timestamps through a token bucket rate limiter
-and reports which requests would have been allowed or denied.
+Replays a log of request timestamps through a rate limiter and reports
+which requests would have been allowed or denied.
 
-  --rate <n>        tokens added per interval (required)
+  --rate <n>        requests allowed per interval (required)
   --per <duration>  interval length, e.g. 500ms, 1s, 1m, 1h (default: 1s)
-  --burst <n>       bucket capacity (default: same as --rate)
+  --burst <n>       bucket capacity, token-bucket only (default: same as --rate)
+  --algorithm <name>  one of token-bucket, sliding-window, fixed-window
+                       (default: token-bucket)
+
+Algorithms:
+  token-bucket    smooths bursts across the window; --burst controls how
+                  far above the steady rate a key can spike
+  sliding-window  exact count of hits in the trailing --per window, no
+                  boundary effects, one timestamp remembered per hit
+  fixed-window    hits counted in --per-wide windows aligned to the epoch;
+                  cheapest, but allows up to 2x --rate across a boundary
 
 Reads from the given files, or from stdin if none are given.
 
@@ -50,6 +82,7 @@ and must arrive in non-decreasing timestamp order within each key.`)
 }
 
 function parseArgs(argv: string[]): Options {
+  let algorithm: Algorithm = 'token-bucket'
   let rate: number | null = null
   let perMs = 1000
   let burst: number | null = null
@@ -58,6 +91,14 @@ function parseArgs(argv: string[]): Options {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     switch (arg) {
+      case '--algorithm': {
+        const value = argv[++i]
+        if (!ALGORITHMS.includes(value as Algorithm)) {
+          throw new Error(`unknown algorithm "${value}", expected one of ${ALGORITHMS.join(', ')}`)
+        }
+        algorithm = value as Algorithm
+        break
+      }
       case '--rate':
         rate = Number(argv[++i])
         break
@@ -87,7 +128,7 @@ function parseArgs(argv: string[]): Options {
     throw new Error('--per must resolve to a positive duration')
   }
 
-  return { rate, perMs, burst: burst ?? rate, files }
+  return { algorithm, rate, perMs, burst: burst ?? rate, files }
 }
 
 interface ParsedLine {
@@ -123,7 +164,7 @@ async function* readLines(files: string[]): AsyncGenerator<string> {
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2))
   const refillRatePerMs = options.rate / options.perMs
-  const buckets = new Map<string, TokenBucket>()
+  const buckets = new Map<string, RateLimiter>()
 
   let total = 0
   let allowed = 0
@@ -141,7 +182,7 @@ async function main(): Promise<void> {
 
     let bucket = buckets.get(parsed.key)
     if (!bucket) {
-      bucket = new TokenBucket({ capacity: options.burst, refillRatePerMs })
+      bucket = createLimiter(options, refillRatePerMs)
       buckets.set(parsed.key, bucket)
     }
 

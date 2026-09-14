@@ -7,8 +7,8 @@ have been rejected? Which keys would have felt it the most? ratecheck
 answers that by replaying the log through a token bucket, offline, using the
 timestamps that are already in the log instead of the wall clock.
 
-It does one thing: read timestamped events, run them through a token bucket,
-print ALLOW or DENY for each one.
+It does one thing: read timestamped events, run them through a rate
+limiter, print ALLOW or DENY for each one.
 
 ## Build
 
@@ -23,13 +23,27 @@ itself has no runtime dependencies.
 ## Usage
 
 ```
-node dist/main.js --rate <n> [--per <duration>] [--burst <n>] [file...]
+node dist/main.js --rate <n> [--per <duration>] [--burst <n>] [--algorithm <name>] [file...]
 ```
 
-- `--rate` — tokens added per interval (required)
+- `--rate` — requests allowed per interval (required)
 - `--per` — interval length: `500ms`, `1s`, `1m`, `1h` (default `1s`)
 - `--burst` — bucket capacity, i.e. how much burst above the steady rate is
-  allowed (default: same as `--rate`)
+  allowed (default: same as `--rate`); only applies to `token-bucket`
+- `--algorithm` — which limiter to simulate: `token-bucket` (default),
+  `sliding-window`, or `fixed-window`
+
+### Algorithms
+
+- `token-bucket` — tokens refill continuously at `--rate` per `--per`, up to
+  `--burst`. Smooths traffic and allows short bursts to spend saved-up
+  tokens.
+- `sliding-window` — counts exact hits in the trailing `--per` window
+  against `--rate`. No boundary effects, but remembers one timestamp per
+  hit currently in the window.
+- `fixed-window` — counts hits in `--per`-wide windows aligned to the
+  epoch against `--rate`. Cheapest to reason about, but a client can send
+  up to `2 * --rate` requests by timing a burst across a window boundary.
 
 Reads from the files given on the command line, or from stdin if none are
 given, so it fits into a pipeline:
