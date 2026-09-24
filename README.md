@@ -32,6 +32,8 @@ node dist/main.js --rate <n> [--per <duration>] [--burst <n>] [--algorithm <name
   allowed (default: same as `--rate`); only applies to `token-bucket`
 - `--algorithm` — which limiter to simulate: `token-bucket` (default),
   `sliding-window`, or `fixed-window`
+- `--format` — `text` (default) or `json`, one result object per line on
+  stdout
 
 ### Algorithms
 
@@ -97,3 +99,21 @@ node dist/main.js --rate 5 --per 1s example.txt
 
 Lines that fail to parse are skipped with a warning on stderr rather than
 aborting the whole run.
+
+### JSON output
+
+With `--format json`, each line on stdout is a single JSON object instead
+of the text line, which makes it easy to pipe into `jq` or feed into
+another tool:
+
+```
+node dist/main.js --rate 5 --per 1s --format json example.txt
+```
+
+```
+{"timestamp":"2026-01-01T00:00:00.000Z","key":"user-a","allowed":true,"retryAfterMs":0}
+{"timestamp":"2026-01-01T00:00:00.050Z","key":"user-b","allowed":true,"retryAfterMs":0}
+```
+
+The trailing summary is also emitted as a single JSON object (on stderr,
+same as the text summary) instead of the `N/M allowed across ...` line.

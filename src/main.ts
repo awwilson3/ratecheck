@@ -7,14 +7,17 @@ import { SlidingWindow } from './slidingWindow.js'
 import { FixedWindow } from './fixedWindow.js'
 
 type Algorithm = 'token-bucket' | 'sliding-window' | 'fixed-window'
+type Format = 'text' | 'json'
 
 const ALGORITHMS: Algorithm[] = ['token-bucket', 'sliding-window', 'fixed-window']
+const FORMATS: Format[] = ['text', 'json']
 
 interface Options {
   algorithm: Algorithm
   rate: number
   perMs: number
   burst: number
+  format: Format
   files: string[]
 }
 
@@ -61,6 +64,7 @@ which requests would have been allowed or denied.
   --burst <n>       bucket capacity, token-bucket only (default: same as --rate)
   --algorithm <name>  one of token-bucket, sliding-window, fixed-window
                        (default: token-bucket)
+  --format <name>   text (default) or json, one result object per line
 
 Algorithms:
   token-bucket    smooths bursts across the window; --burst controls how
@@ -86,6 +90,7 @@ function parseArgs(argv: string[]): Options {
   let rate: number | null = null
   let perMs = 1000
   let burst: number | null = null
+  let format: Format = 'text'
   const files: string[] = []
 
   for (let i = 0; i < argv.length; i++) {
@@ -108,6 +113,14 @@ function parseArgs(argv: string[]): Options {
       case '--burst':
         burst = Number(argv[++i])
         break
+      case '--format': {
+        const value = argv[++i]
+        if (!FORMATS.includes(value as Format)) {
+          throw new Error(`unknown format "${value}", expected one of ${FORMATS.join(', ')}`)
+        }
+        format = value as Format
+        break
+      }
       case '-h':
       case '--help':
         printUsage()
@@ -128,7 +141,7 @@ function parseArgs(argv: string[]): Options {
     throw new Error('--per must resolve to a positive duration')
   }
 
-  return { algorithm, rate, perMs, burst: burst ?? rate, files }
+  return { algorithm, rate, perMs, burst: burst ?? rate, format, files }
 }
 
 interface ParsedLine {
@@ -190,15 +203,30 @@ async function main(): Promise<void> {
       const result = bucket.check(parsed.atMs)
       total++
       if (result.allowed) allowed++
-      const status = result.allowed ? 'ALLOW' : `DENY retry_after=${result.retryAfterMs}ms`
-      console.log(`${new Date(parsed.atMs).toISOString()} ${parsed.key} ${status}`)
+      if (options.format === 'json') {
+        console.log(
+          JSON.stringify({
+            timestamp: new Date(parsed.atMs).toISOString(),
+            key: parsed.key,
+            allowed: result.allowed,
+            retryAfterMs: result.retryAfterMs,
+          }),
+        )
+      } else {
+        const status = result.allowed ? 'ALLOW' : `DENY retry_after=${result.retryAfterMs}ms`
+        console.log(`${new Date(parsed.atMs).toISOString()} ${parsed.key} ${status}`)
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       console.error(`line ${lineNumber}: ${message}, skipping`)
     }
   }
 
-  console.error(`\n${allowed}/${total} allowed across ${buckets.size} key(s)`)
+  if (options.format === 'json') {
+    console.error(JSON.stringify({ allowed, total, keys: buckets.size }))
+  } else {
+    console.error(`\n${allowed}/${total} allowed across ${buckets.size} key(s)`)
+  }
 }
 
 main().catch((err: unknown) => {
