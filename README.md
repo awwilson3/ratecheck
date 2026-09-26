@@ -20,6 +20,16 @@ npm run build
 This only pulls in the TypeScript compiler as a dev dependency; the tool
 itself has no runtime dependencies.
 
+## Test
+
+```
+npm test
+```
+
+Runs the three limiter implementations through their edge cases (refill
+capping, out-of-order timestamps, window boundaries) with Node's built-in
+test runner. No test framework dependency needed.
+
 ## Usage
 
 ```
